@@ -1,17 +1,8 @@
-# Notion API Key (muss vom Nutzer angelegt werden)
-notion_key.txt
 notion_key_test.txt
-
-# Python Cache
+notion_key.txt
 __pycache__/
 *.pyc
-*.pyo
-
-# Temporäre Fix-Skripte
-fix_*.py
-cleanup_db.py
-add_timestamp_col.py
-
-# OS
-.DS_Store
-Thumbs.db
+.env
+*.egg-info/
+dist/
+build/

@@ -9,12 +9,40 @@ Automatisierte Kleinanzeigen-Suche mit Notion-Datenbank-Anbindung.
 3. Filtert nach **Entfernung** und **Preis**
 4. Schreibt gefundene Artikel in eine zweite **Notion-Datenbank** (mit Link, Preis, Ort, Entfernung, Timestamp)
 
+## Projektstruktur
+
+```
+notion-kleinanzeigen/
+├── README.md
+├── .gitignore
+├── src/
+│   ├── __init__.py
+│   ├── config.py              # Token-Laden, DB-IDs, Konstanten
+│   ├── workflow.py            # Hauptlogik (verbindet Notion + Kleinanzeigen)
+│   ├── notion/
+│   │   ├── __init__.py
+│   │   └── client.py          # Notion-API-Wrapper (nur urllib)
+│   └── kleinanzeigen/
+│       ├── __init__.py
+│       ├── search.py          # URL-Bau, HTML-Parsing, Article-Extraktion
+│       ├── geo.py             # PLZ-Koordinaten, Haversine, PLZ-Extraktion
+│       └── user_agents.py     # User-Agent-Rotation
+├── scripts/
+│   ├── run_search.py          # Entrypoint für die Suche
+│   └── inspect_db.py          # DB-Inspektion (Schema + Einträge)
+└── data/
+    └── plz_coords.py          # PLZ-Koordinaten-Daten (ca. 300 Orte)
+```
+
 ## Setup
 
 ### 1. Notion-Integration
+
 1. Gehe zu https://www.notion.so/profile/integrations
 2. Erstelle eine interne Integration → kopiere den API-Key
-3. Speichere den Key in `notion_key.txt` (wird von `.gitignore` ausgeschlossen)
+3. Speichere den Key in `C:\Users\renko\notion_key_test.txt` (wird von `.gitignore` ausgeschlossen)
+
+Oder setze die Umgebungsvariable `NOTION_TOKEN_PATH` auf einen anderen Pfad.
 
 ### 2. Notion-Datenbanken
 
@@ -35,15 +63,29 @@ Automatisierte Kleinanzeigen-Suche mit Notion-Datenbank-Anbindung.
 ### 3. Ausführen
 
 ```bash
-python kleinanzeigen_search.py
+# Normale Suche (schreibt Ergebnisse in Notion)
+python scripts/run_search.py
+
+# Dry Run (nur Simulation, keine Schreibvorgänge)
+python scripts/run_search.py --dry-run
+
+# Datenbanken inspizieren
+python scripts/inspect_db.py
 ```
 
-Der API-Key wird automatisch aus `notion_key.txt` geladen.
+**Wichtig:** Immer aus dem Projekt-Root-Verzeichnis ausführen.
 
 ## Technisches
 
-- Python 3.11+ (kein `requests` nötig — nur Stdlib)
-- Notion API Version `2022-06-28`
-- Kleinanzeigen-Suche via Formular-Parameter (`locationStr` + `radius`)
-- Entfernungsfilter nutzt Kleinanzeigens eigene Distanzangabe (Fallback: Haversine)
-- User-Agent Rotation und zufällige Verzögerungen zur Vermeidung von IP-Blocks
+- **Python 3.11+** (kein `requests` nötig — nur Stdlib `urllib`)
+- **Notion API Version `2022-06-28`** — `2025-09-03` liefert `invalid_request_url` für Linked Databases
+- **Kleinanzeigen-Suche** via Formular-Parameter (`locationStr` + `radius`)
+- **Entfernungsfilter** nutzt Kleinanzeigens eigene Distanzangabe (Fallback: Haversine mit PLZ-Koordinaten)
+- **User-Agent Rotation** und zufällige Verzögerungen zur Vermeidung von IP-Blocks
+- **Strikte Trennung:** `src/notion/` und `src/kleinanzeigen/` importieren sich gegenseitig nicht
+
+## Hinweise
+
+- Bei IP-Block (HTTP 403) hilft nur warten (Stunden) oder VPN/Proxy verwenden
+- Der API-Key muss in `notion_key_test.txt` liegen (Standardpfad) oder via `NOTION_TOKEN_PATH` konfiguriert sein
+- Keine externen Dependencies — nur Python Standard Library
