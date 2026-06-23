@@ -34,10 +34,7 @@ except Exception as e:
 
 # Test 4: kleinanzeigen geo
 try:
-    from src.kleinanzeigen.geo import haversine, get_plz_coords, extract_plz_from_text, parse_price
-    assert haversine(52.52, 13.41, 48.14, 11.58) > 0  # Berlin->München > 0
-    coords = get_plz_coords('33129')
-    assert coords == (51.75, 8.37), f'Expected (51.75, 8.37), got {coords}'
+    from src.kleinanzeigen.geo import extract_plz_from_text, parse_price
     plz = extract_plz_from_text('12345 Berlin')
     assert plz == '12345', f'Expected 12345, got {plz}'
     price = parse_price('12,99 €')

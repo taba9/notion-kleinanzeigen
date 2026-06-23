@@ -2,6 +2,10 @@
 
 Dies ist die EINZIGE Datei, die sowohl src/notion/ als auch
 src/kleinanzeigen/ importiert.
+
+Entfernung wird direkt von Kleinanzeigen übernommen (ka_distance) —
+KEIN Haversine-Nachfilter mehr, da KA bereits serverseitig
+nach PLZ+Radius filtert.
 """
 
 import time
@@ -14,7 +18,7 @@ from .notion.client import (
     query_database, extract_property_value, create_page,
 )
 from .kleinanzeigen.search import fetch_kleinanzeigen
-from .kleinanzeigen.geo import get_plz_coords, haversine, extract_plz_from_text
+from .kleinanzeigen.geo import extract_plz_from_text
 
 
 def log(msg):
@@ -42,69 +46,13 @@ def get_existing_links(db_id, token=None):
     return existing_links
 
 
-def filter_by_distance(articles, search_plz, max_radius_km):
-    """Filtert Artikel nach maximaler Entfernung (Luftlinie) zur Such-PLZ.
-
-    Berechnet die Entfernung für jeden Artikel.
-    Bevorzugt Kleinanzeigens eigene Distanzangabe (genauer).
-    Gibt Artikel mit berechneter Entfernung zurück.
-    """
-    if not search_plz or not max_radius_km:
-        return articles
-
-    search_coords = get_plz_coords(search_plz)
-    filtered = []
-
-    for a in articles:
-        # Kleinanzeigen-eigene Distanz bevorzugen (genauer)
-        ka_dist = a.get('ka_distance')
-        if ka_dist is not None:
-            a['distance'] = ka_dist
-            if ka_dist <= max_radius_km:
-                filtered.append(a)
-            else:
-                a['_skipped_reason'] = (
-                    f'Entfernung {ka_dist}km > {max_radius_km}km (KA-Angabe)'
-                )
-            continue
-
-        # Fallback: PLZ aus dem Artikel extrahieren und Haversine rechnen
-        plz = a.get('location_plz')
-        if not plz:
-            plz = extract_plz_from_text(a.get('location', ''))
-            if plz:
-                a['location_plz'] = plz
-
-        if plz:
-            item_coords = get_plz_coords(plz)
-            distance = haversine(
-                search_coords[0], search_coords[1],
-                item_coords[0], item_coords[1]
-            )
-            a['distance'] = distance
-
-            if distance <= max_radius_km:
-                filtered.append(a)
-            else:
-                a['_skipped_reason'] = (
-                    f'Entfernung {distance}km > {max_radius_km}km'
-                )
-        else:
-            # Keine PLZ → trotzdem aufnehmen, Entfernung auf -1
-            a['distance'] = -1
-            a['_skipped_reason'] = 'Keine PLZ im Artikel gefunden'
-            filtered.append(a)
-
-    return filtered
-
-
 def run(dry_run=False):
     """Hauptfunktion: Führt die gesamte Such-Workflow aus.
 
     1. Suchparameter aus DB lesen
     2. Vorhandene Ergebnisse laden (Dublettenprüfung)
     3. Für jede Suchanfrage Kleinanzeigen durchsuchen
-    4. Nach Entfernung filtern
+    4. Distanz aus KA-Ergebnissen übernehmen (kein Nachfilter nötig)
     5. Dubletten und Preis prüfen
     6. Neue Ergebnisse in DB schreiben
 
@@ -196,23 +144,11 @@ def run(dry_run=False):
             log('  📭 Keine Artikel gefunden')
             continue
 
-        # ─── Schritt 5: Nach Entfernung filtern ───
-        if plz and radius_km:
-            log(f'📍 Schritt 4: Filtere nach Entfernung (≤{radius_km}km von {plz})...')
-            articles = filter_by_distance(articles, plz, radius_km)
-            before = len(articles)
-            articles_filtered = [
-                a for a in articles
-                if '_skipped_reason' not in a
-                or 'Entfernung' not in a.get('_skipped_reason', '')
-            ]
-            removed_count = before - len(articles_filtered)
-            if removed_count > 0:
-                log(f'  🗑 {removed_count} Artikel wegen Entfernung >{radius_km}km entfernt')
-                for a in articles:
-                    if '_skipped_reason' in a and 'Entfernung' in a['_skipped_reason']:
-                        log(f'    ↳ {a.get("name", "?")} — {a["_skipped_reason"]}')
-            articles = articles_filtered
+        # ─── Schritt 5: Distanz aus KA-Ergebnissen übernehmen ───
+        # Kleinanzeigen filtert bereits serverseitig nach PLZ+Radius.
+        # Wir vertrauen der von KA gelieferten Entfernung (ka_distance).
+        for a in articles:
+            a['distance'] = a.get('ka_distance')  # None wenn KA keine Distanz liefert
 
         log(f'  ✅ {len(articles)} Artikel im Umkreis')
 
@@ -272,7 +208,7 @@ def run(dry_run=False):
                         'rich_text': [{'text': {'content': location}}],
                     },
                     'Entfernung': {
-                        'number': distance if distance >= 0 else None,
+                        'number': distance if distance is not None and distance >= 0 else None,
                     },
                     'Link': {
                         'url': link if link else None,
@@ -287,7 +223,7 @@ def run(dry_run=False):
                 if dry_run:
                     log(
                         f'  📝 [DRY RUN] {name} — {price_val}€ — '
-                        f'{location}{", " + str(distance) + "km" if distance >= 0 else ""}'
+                        f'{location}{", " + str(distance) + "km" if distance is not None and distance >= 0 else ""}'
                     )
                     total_new += 1
                 else:
@@ -295,7 +231,7 @@ def run(dry_run=False):
                         result = create_page(DB_RESULT_ID, properties, token=token)
                         if result:
                             total_new += 1
-                            dist_str = f', {distance}km' if distance >= 0 else ''
+                            dist_str = f', {distance}km' if distance is not None and distance >= 0 else ''
                             log(
                                 f'  ✅ [{i+1}/{len(new_articles)}] {name} — '
                                 f'{price_val}€ — {location}{dist_str}'
