@@ -18,20 +18,21 @@ notion-kleinanzeigen/
 ├── src/
 │   ├── __init__.py
 │   ├── config.py              # Token-Laden, DB-IDs, Konstanten
-│   ├── workflow.py            # Hauptlogik (verbindet Notion + Kleinanzeigen)
+│   ├── logger.py              # 🆕 Einheitliches Logging
+│   ├── filters.py             # 🆕 Preis- + Dubletten-Filter
+│   ├── workflow.py            # Orchestrierung (verbindet Notion + KA)
 │   ├── notion/
 │   │   ├── __init__.py
-│   │   └── client.py          # Notion-API-Wrapper (nur urllib)
+│   │   ├── client.py          # Notion-API-Wrapper (nur urllib)
+│   │   └── properties.py      # 🆕 Schema-Property-Builder für DBs
 │   └── kleinanzeigen/
 │       ├── __init__.py
-│       ├── search.py          # URL-Bau, HTML-Parsing, Article-Extraktion
-│       ├── geo.py             # PLZ-Koordinaten, Haversine, PLZ-Extraktion
+│       ├── search.py          # URL-Bau, HTML-Parsing, Extraktion
+│       ├── text_utils.py      # 🆕 Text-Helfer (PLZ, Preis u.a.)
 │       └── user_agents.py     # User-Agent-Rotation
-├── scripts/
-│   ├── run_search.py          # Entrypoint für die Suche
-│   └── inspect_db.py          # DB-Inspektion (Schema + Einträge)
-└── data/
-    └── plz_coords.py          # PLZ-Koordinaten-Daten (ca. 300 Orte)
+└── scripts/
+    ├── run_search.py          # Entrypoint (--dry-run, --force)
+    └── inspect_db.py          # DB-Inspektion (Schema + Einträge)
 ```
 
 ## Setup

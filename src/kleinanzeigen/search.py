@@ -13,7 +13,7 @@ import urllib.error
 
 from ..config import KA_BASE
 from .user_agents import random_user_agent
-from .geo import parse_price, extract_plz_from_text
+from .text_utils import parse_price, extract_plz_from_text
 
 
 def build_search_url(search_term, max_price=None, plz=None, radius=None):

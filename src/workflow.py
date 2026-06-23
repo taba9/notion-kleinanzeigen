@@ -3,37 +3,35 @@
 Dies ist die EINZIGE Datei, die sowohl src/notion/ als auch
 src/kleinanzeigen/ importiert.
 
-Entfernung wird direkt von Kleinanzeigen übernommen (ka_distance) —
-KEIN Haversine-Nachfilter mehr, da KA bereits serverseitig
-nach PLZ+Radius filtert.
+Aufgaben:
+  1. Suchparameter aus Notion-DB lesen
+  2. Vorhandene Ergebnisse laden (Dublettenprüfung)
+  3. Für jede Suchanfrage Kleinanzeigen durchsuchen
+  4. Neue, preislich passende Artikel herausfiltern
+  5. Ergebnisse in Notion-DB schreiben
 """
 
 import time
-import datetime
 import random
 import sys
 
 from .config import DB_SEARCH_ID, DB_RESULT_ID, load_token
-from .notion.client import (
-    query_database, extract_property_value, create_page,
-)
+from .logger import log, section, header, summary_line
+from .filters import apply_all_filters
+from .notion.client import query_database, create_page
+from .notion.properties import extract_search_entry, build_result_properties
 from .kleinanzeigen.search import fetch_kleinanzeigen
-from .kleinanzeigen.geo import extract_plz_from_text
-
-
-def log(msg):
-    """Einheitliche Log-Ausgabe mit Zeitstempel."""
-    ts = time.strftime('%H:%M:%S')
-    print(f'[{ts}] {msg}')
-    sys.stdout.flush()
+from .kleinanzeigen.text_utils import extract_plz_from_text
 
 
 def get_existing_links(db_id, token=None):
     """Holt alle vorhandenen Ergebnis-Links aus der Ergebnis-DB.
 
-    Gibt ein Set von URLs zurück.
+    Returns:
+        Set von URLs (normalisiert ohne trailing slash)
     """
     entries = query_database(db_id, token=token)
+    from .notion.client import extract_property_value
     existing_links = set()
 
     for entry in entries:
@@ -46,219 +44,155 @@ def get_existing_links(db_id, token=None):
     return existing_links
 
 
-def run(dry_run=False):
+def run(dry_run=False, force=False):
     """Hauptfunktion: Führt die gesamte Such-Workflow aus.
 
-    1. Suchparameter aus DB lesen
-    2. Vorhandene Ergebnisse laden (Dublettenprüfung)
-    3. Für jede Suchanfrage Kleinanzeigen durchsuchen
-    4. Distanz aus KA-Ergebnissen übernehmen (kein Nachfilter nötig)
-    5. Dubletten und Preis prüfen
-    6. Neue Ergebnisse in DB schreiben
-
     Args:
-        dry_run: Wenn True, keine Notion-Schreiboperationen ausführen
+        dry_run: Wenn True, keine Notion-Schreiboperationen
+        force:   Wenn True, überspringe die "vor kurzem gelaufen"-Prüfung
     """
-    log('═' * 60)
-    log('🔍 KLEINANZEIGEN SEARCH — Automatisierte Suche')
-    log('═' * 60)
+    header('🔍 KLEINANZEIGEN SEARCH — Automatisierte Suche')
 
     if dry_run:
-        log('⚙️  DRY RUN — Es werden keine Änderungen geschrieben')
+        log('⚙️  DRY RUN — Es werden keine Änderungen geschrieben', '  ')
+    if force:
+        log('⚡ FORCE-Modus — Überspringe Zeit-Prüfungen', '  ')
 
-    # Token laden
+    # ─── Token laden ───
     token = load_token()
-    log(f'  Token OK: {token[:10]}...{token[-4:]}')
+    log(f'Token OK: …{token[-8:]}', '  ')
 
     # ─── Schritt 1: Suchparameter aus DB1 lesen ───
-    log('')
-    log('📖 Schritt 1: Lese Suchparameter aus DB "Artikel"...')
+    section('📖 Schritt 1: Lese Suchparameter aus DB „Artikel"')
     search_entries = query_database(DB_SEARCH_ID, token=token)
-    log(f'  ✅ {len(search_entries)} Suchanfragen gefunden')
+    log(f'✅ {len(search_entries)} Suchanfragen gefunden', '  ')
 
     if not search_entries:
         log('❌ Keine Suchanfragen in der Datenbank.')
         return
 
     # ─── Schritt 2: Vorhandene Links aus DB2 laden ───
-    log('')
-    log('📖 Schritt 2: Lade vorhandene Ergebnisse aus DB "Gefunden Artikel"...')
+    section('📖 Schritt 2: Lade vorhandene Ergebnisse aus DB „Gefunden Artikel"')
     existing_links = get_existing_links(DB_RESULT_ID, token=token)
 
     # ─── Schritt 3: Für jede Suchanfrage ausführen ───
-    total_new = 0
-    total_skipped = 0
-    total_errors = 0
+    stats = {'total_new': 0, 'total_skipped': 0, 'total_errors': 0}
 
     for idx, entry in enumerate(search_entries):
-        props = entry.get('properties', {})
+        search = extract_search_entry(entry.get('properties', {}))
+        name = search['name']
+        max_price = search['max_price']
+        ort = search['ort']
+        umkreis = search['umkreis']
 
-        artikelname = extract_property_value(props, 'Artikelname') or ''
-        max_price = extract_property_value(props, 'Preis')
-        ort = extract_property_value(props, 'Ort') or ''
+        # PLZ aus Ort extrahieren
         plz = extract_plz_from_text(ort) or ''
-        umkreis = extract_property_value(props, 'Umkreis')
 
         log('')
-        log('─' * 50)
-        log(f'📦 Suchanfrage {idx+1}/{len(search_entries)}: "{artikelname}"')
-        log(f'   Max-Preis: {max_price} € | Ort: {ort} → PLZ: {plz} | Umkreis: {umkreis} km')
+        log('─' * 55)
+        log(f'📦 Suchanfrage {idx+1}/{len(search_entries)}: "{name}"')
+        log(f'   Max-Preis: {max_price if max_price < 999999 else "—"} € '
+            f'| Ort: {ort} → PLZ: {plz} '
+            f'| Umkreis: {umkreis if umkreis else "—"} km')
 
-        if not artikelname:
+        if not name:
             log('⚠  Überspringe: Kein Artikelname')
             continue
-
-        # Preis normalisieren
-        if max_price is not None:
-            try:
-                max_price = float(max_price)
-            except (ValueError, TypeError):
-                max_price = 999999
-        else:
-            max_price = 999999
-
-        # Umkreis normalisieren
-        if umkreis is not None:
-            try:
-                radius_km = float(umkreis)
-            except (ValueError, TypeError):
-                radius_km = None
-        else:
-            radius_km = None
 
         # ─── Schritt 4: Kleinanzeigen-Suche ───
         log(f'🔎 Schritt 3: Suche auf Kleinanzeigen...')
         try:
             articles = fetch_kleinanzeigen(
-                artikelname,
+                name,
                 int(max_price) if max_price < 999999 else '',
                 plz,
-                int(radius_km) if radius_km else None,
+                int(umkreis) if umkreis else None,
             )
         except Exception as e:
             log(f'  ❌ Fehler bei der Suche: {e}')
-            total_errors += 1
+            stats['total_errors'] += 1
             continue
 
         if not articles:
             log('  📭 Keine Artikel gefunden')
             continue
 
-        # ─── Schritt 5: Distanz aus KA-Ergebnissen übernehmen ───
-        # Kleinanzeigen filtert bereits serverseitig nach PLZ+Radius.
-        # Wir vertrauen der von KA gelieferten Entfernung (ka_distance).
+        # Distanz aus KA-Ergebnissen übernehmen
         for a in articles:
-            a['distance'] = a.get('ka_distance')  # None wenn KA keine Distanz liefert
+            a['distance'] = a.get('ka_distance')
 
-        log(f'  ✅ {len(articles)} Artikel im Umkreis')
+        log(f'✅ {len(articles)} Artikel im Umkreis gefunden', '  ')
 
-        # ─── Schritt 6: Dubletten-Prüfung & Preis-Filter ───
-        log(f'🔍 Schritt 5: Prüfe auf Dubletten und Preis...')
-        new_articles = []
-        skipped_duplicates = 0
-        skipped_price = 0
+        # ─── Schritt 5: Filtern (Preis + Dubletten) ───
+        section('🔍 Schritt 4: Filtere nach Preis & Dubletten')
+        filtered, filter_stats = apply_all_filters(articles, max_price, existing_links)
 
-        for a in articles:
-            url = a.get('url', '').strip().rstrip('/')
-            price = a.get('price')
-            name = a.get('name', '(kein Titel)')
+        if filter_stats['price_skipped'] > 0:
+            summary_line('Wegen Preis > Preislimit übersprungen',
+                         filter_stats['price_skipped'], '⏭')
+        if filter_stats['duplicate_skipped'] > 0:
+            summary_line('Dubletten übersprungen',
+                         filter_stats['duplicate_skipped'], '⏭')
 
-            # Preis-Check
-            if price is not None and max_price < 999999 and price > max_price:
-                skipped_price += 1
-                continue
+        log(f'✅ {len(filtered)} neue Artikel zum Schreiben', '  ')
+        stats['total_skipped'] += (
+            filter_stats['price_skipped'] + filter_stats['duplicate_skipped']
+        )
 
-            # Dubletten-Check (anhand URL)
-            if url and url in existing_links:
-                skipped_duplicates += 1
-                continue
-
-            new_articles.append(a)
-
-        log(f'  ✅ {len(new_articles)} neue Artikel')
-        if skipped_duplicates > 0:
-            log(f'  ⏭ {skipped_duplicates} Dubletten übersprungen')
-            total_skipped += skipped_duplicates
-        if skipped_price > 0:
-            log(f'  ⏭ {skipped_price} wegen Preis >{max_price}€ übersprungen')
-
-        # ─── Schritt 7: In Ergebnis-DB schreiben ───
-        if new_articles:
-            log(f'💾 Schritt 6: Schreibe {len(new_articles)} neue Artikel in Ergebnis-DB...')
-
-            for i, a in enumerate(new_articles):
-                name = a.get('name', '(kein Titel)')[:80]
-                price_val = a.get('price')
-                location = (
-                    a.get('location', '')[:30]
-                    if a.get('location') else ''
-                )
-                distance = a.get('distance', -1)
-                link = a.get('url', '')
-
-                # Notion-Properties
-                properties = {
-                    'Artikelname': {
-                        'title': [{'text': {'content': name}}],
-                    },
-                    'Preis': {
-                        'number': price_val if price_val is not None else None,
-                    },
-                    'Ort': {
-                        'rich_text': [{'text': {'content': location}}],
-                    },
-                    'Entfernung': {
-                        'number': distance if distance is not None and distance >= 0 else None,
-                    },
-                    'Link': {
-                        'url': link if link else None,
-                    },
-                    'Gefunden am': {
-                        'date': {
-                            'start': datetime.datetime.now().isoformat(),
-                        },
-                    },
-                }
-
-                if dry_run:
-                    log(
-                        f'  📝 [DRY RUN] {name} — {price_val}€ — '
-                        f'{location}{", " + str(distance) + "km" if distance is not None and distance >= 0 else ""}'
-                    )
-                    total_new += 1
-                else:
-                    try:
-                        result = create_page(DB_RESULT_ID, properties, token=token)
-                        if result:
-                            total_new += 1
-                            dist_str = f', {distance}km' if distance is not None and distance >= 0 else ''
-                            log(
-                                f'  ✅ [{i+1}/{len(new_articles)}] {name} — '
-                                f'{price_val}€ — {location}{dist_str}'
-                            )
-                            existing_links.add(link)
-                        else:
-                            total_errors += 1
-                    except RuntimeError as e:
-                        log(f'  ❌ {e}')
-                        total_errors += 1
-
-                if not dry_run:
-                    time.sleep(random.uniform(1.5, 3.0))
-        else:
+        # ─── Schritt 6: In Ergebnis-DB schreiben ───
+        if not filtered:
             log('  💤 Nichts Neues für diese Suchanfrage')
+            time.sleep(random.uniform(1.5, 3.0))
+            continue
+
+        section('💾 Schritt 5: Schreibe in Ergebnis-DB')
+
+        for i, a in enumerate(filtered):
+            name_val = a.get('name', '(kein Titel)')
+            price_val = a.get('price')
+            location = a.get('location', '') or ''
+            distance = a.get('distance')
+            link = a.get('url', '')
+
+            props = build_result_properties(
+                name=name_val,
+                price=price_val,
+                location=location,
+                distance=distance,
+                link=link,
+            )
+
+            if dry_run:
+                dist_str = f', {distance}km' if distance is not None and distance >= 0 else ''
+                log(f'  📝 [DRY RUN] {name_val} — {price_val}€ — {location}{dist_str}')
+                stats['total_new'] += 1
+            else:
+                try:
+                    result = create_page(DB_RESULT_ID, props, token=token)
+                    if result:
+                        stats['total_new'] += 1
+                        dist_str = f', {distance}km' if distance is not None and distance >= 0 else ''
+                        log(f'  ✅ [{i+1}/{len(filtered)}] {name_val} — '
+                            f'{price_val}€ — {location}{dist_str}')
+                        existing_links.add(link.strip().rstrip('/'))
+                    else:
+                        stats['total_errors'] += 1
+                except RuntimeError as e:
+                    log(f'  ❌ {e}')
+                    stats['total_errors'] += 1
+
+            if not dry_run:
+                time.sleep(random.uniform(1.5, 3.0))
 
         # Pause zwischen Suchanfragen
-        time.sleep(random.uniform(3.0, 6.0))
+        time.sleep(random.uniform(2.0, 5.0))
 
     # ─── Zusammenfassung ───
+    header('📊 ZUSAMMENFASSUNG')
+    summary_line('Suchanfragen verarbeitet', len(search_entries), '📦')
+    summary_line('Neue Artikel hinzugefügt', stats['total_new'], '✅')
+    summary_line('Dubletten / gefiltert', stats['total_skipped'], '⏭')
+    summary_line('Fehler', stats['total_errors'], '❌')
     log('')
-    log('═' * 60)
-    log('📊 ZUSAMMENFASSUNG')
-    log('═' * 60)
-    log(f'  Suchanfragen verarbeitet: {len(search_entries)}')
-    log(f'  Neue Artikel hinzugefügt: {total_new}')
-    log(f'  Dubletten übersprungen:   {total_skipped}')
-    log(f'  Fehler:                   {total_errors}')
-    log('═' * 60)
     log('✅ Fertig!')
+    sys.stdout.flush()
