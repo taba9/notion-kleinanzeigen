@@ -21,10 +21,26 @@ def extract_plz_from_text(text):
 
 
 def parse_price(price_text):
-    """Parst einen Preis aus Text, gibt float oder None zurück."""
+    """Parst einen Preis aus Text, gibt float oder None zurück.
+
+    Heuristik für Tausender-Trenner:
+    - Wenn Punkt UND Komma vorkommen → Punkt ist Tausender, Komma ist Dezimal
+    - Wenn nur Komma vorkommt → Komma ist Dezimal (deutsches Format)
+    - Wenn nur Punkt vorkommt → Punkt ist Dezimal (internationales Format)
+    """
     if not price_text:
         return None
-    price_text = price_text.replace('.', '').replace(',', '.')
+
+    # Heuristik für Tausender-Trenner
+    if '.' in price_text and ',' in price_text:
+        # Punkt = Tausender, Komma = Dezimal (z.B. "1.234,56 €")
+        price_text = price_text.replace('.', '').replace(',', '.')
+    elif ',' in price_text:
+        # Nur Komma = deutsches Dezimal-Trennzeichen (z.B. "12,99 €")
+        price_text = price_text.replace(',', '.')
+    # else: Nur Punkt = internationales Dezimal-Trennzeichen (z.B. "12.99 €")
+    # → nichts tun
+
     match = re.search(r'(\d+(?:\.\d{1,2})?)', price_text)
     if match:
         try:

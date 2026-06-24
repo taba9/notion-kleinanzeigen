@@ -20,6 +20,7 @@ Ergebnis-DB „Gefunden Artikel" (ID: 388231b1-…):
 """
 
 import datetime
+from .client import extract_property_value
 
 
 # ─── Extraktion aus Such-DB ──────────────────────────────────
@@ -34,7 +35,6 @@ def extract_search_entry(props):
     Returns:
         Dict mit Keys: name, max_price, ort, umkreis
     """
-    from .client import extract_property_value
 
     name = extract_property_value(props, 'Artikelname') or ''
     max_price = extract_property_value(props, 'Preis')

@@ -88,9 +88,7 @@ def run(dry_run=False, force=False):
         # PLZ aus Ort extrahieren
         plz = extract_plz_from_text(ort) or ''
 
-        log('')
-        log('─' * 55)
-        log(f'📦 Suchanfrage {idx+1}/{len(search_entries)}: "{name}"')
+        section(f'📦 Suchanfrage {idx+1}/{len(search_entries)}: "{name}"')
         log(f'   Max-Preis: {max_price if max_price < 999999 else "—"} € '
             f'| Ort: {ort} → PLZ: {plz} '
             f'| Umkreis: {umkreis if umkreis else "—"} km')

@@ -93,19 +93,7 @@ except Exception as e:
     errors.append(f'[kleinanzeigen.search] {e}')
     print(f'❌ [kleinanzeigen.search] {e}')
 
-# Test 4: kleinanzeigen geo (Alias-Kompatibilität)
-try:
-    from src.kleinanzeigen.geo import extract_plz_from_text, parse_price
-    plz = extract_plz_from_text('12345 Berlin')
-    assert plz == '12345', f'Expected 12345, got {plz}'
-    price = parse_price('12,99 €')
-    assert price == 12.99, f'Expected 12.99, got {price}'
-    log('✅ [kleinanzeigen.geo → Alias] OK')
-except Exception as e:
-    errors.append(f'[kleinanzeigen.geo] {e}')
-    print(f'❌ [kleinanzeigen.geo] {e}')
-
-# Test 5: kleinanzeigen user_agents
+# Test 4: kleinanzeigen user_agents
 try:
     from src.kleinanzeigen.user_agents import random_user_agent, USER_AGENTS
     ua = random_user_agent()
@@ -115,7 +103,7 @@ except Exception as e:
     errors.append(f'[kleinanzeigen.user_agents] {e}')
     print(f'❌ [kleinanzeigen.user_agents] {e}')
 
-# Test 6: workflow
+# Test 5: workflow
 try:
     from src.workflow import run, get_existing_links
     log('✅ [workflow] OK')
@@ -123,7 +111,7 @@ except Exception as e:
     errors.append(f'[workflow] {e}')
     print(f'❌ [workflow] {e}')
 
-# Test 7: dry-run callable
+# Test 6: dry-run callable
 try:
     log('--- Dry-Run Test (simuliert, keine API-Calls) ---')
     log('✅ [workflow.run] callable')

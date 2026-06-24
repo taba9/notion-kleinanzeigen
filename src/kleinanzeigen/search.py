@@ -12,6 +12,7 @@ import urllib.request
 import urllib.error
 
 from ..config import KA_BASE
+from ..logger import log
 from .user_agents import random_user_agent
 from .text_utils import parse_price, extract_plz_from_text
 
@@ -82,9 +83,12 @@ def _fetch_html(url):
         return html
     except urllib.error.HTTPError as e:
         if e.code == 403:
+            log(f'  ⚠ HTTP 403 (IP-Block) für {url}', '')
             return None  # IP block
+        log(f'  ⚠ HTTP {e.code} für {url}', '')
         return None
-    except Exception:
+    except Exception as e:
+        log(f'  ⚠ Fehler beim Abrufen von {url}: {type(e).__name__}: {e}', '')
         return None
 
 
